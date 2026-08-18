@@ -31,6 +31,14 @@ const upload = multer({
     }
 });
 
+/*
+    NOTE: mutool's `clean` command has no CLI option to set a numeric
+    JPEG quality (unlike Ghostscript's -dJPEGQ). The recompress-method
+    flag only accepts one of: never, same, lossless, jpeg, j2k, fax, jbig2.
+    So the only real compression lever we have here is the subsample DPI.
+    jpegQuality is kept only for reference / future use (e.g. if you
+    switch to a Sharp-based re-encode pass for images).
+*/
 const PROFILES = {
     low: {
         dpi: 200,
@@ -70,16 +78,17 @@ function compressWithMuPDF(inputPath, outputPath, quality) {
             '-f',
             '-i',
             '-Z',
+            '-e', '100',
 
             // Color images
             `--color-lossy-image-subsample-method=bicubic`,
-            `--color-lossy-image-subsample-dpi=${profile.dpi},${profile.dpi}`,
-            `--color-lossy-image-recompress-method=jpeg:${profile.jpegQuality}`,
+            `--color-lossy-image-subsample-dpi=${profile.dpi}`,
+            `--color-lossy-image-recompress-method=jpeg`,
 
             // Grayscale images
             `--gray-lossy-image-subsample-method=bicubic`,
-            `--gray-lossy-image-subsample-dpi=${profile.dpi},${profile.dpi}`,
-            `--gray-lossy-image-recompress-method=jpeg:${profile.jpegQuality}`,
+            `--gray-lossy-image-subsample-dpi=${profile.dpi}`,
+            `--gray-lossy-image-recompress-method=jpeg`,
 
             // Only replace an image if the recompressed version is smaller
             '--recompress-images-when=smaller',
