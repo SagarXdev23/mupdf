@@ -853,7 +853,7 @@
     try {
       const formData = new FormData();
       formData.append('file', pdfFile);
-      formData.append('level', currentLevel);
+      formData.append('quality', currentLevel);
 
       setProgress(30, isLarge ? 'Uploading... (large file, please wait)' : 'Compressing with Ghostscript...');
 
@@ -902,7 +902,7 @@
       if (savedBytes > 0) {
         document.getElementById('statSaved').textContent  = savedPct + '%';
         document.getElementById('successMeta').textContent =
-          `Saved ${formatSize(savedBytes)} using Ghostscript · Level: ${currentLevel.charAt(0).toUpperCase() + currentLevel.slice(1)}`;
+          `Saved ${formatSize(savedBytes)} · Level: ${currentLevel.charAt(0).toUpperCase() + currentLevel.slice(1)}`;
       } else {
         document.getElementById('statSaved').textContent  = '~0%';
         document.getElementById('successMeta').textContent =
