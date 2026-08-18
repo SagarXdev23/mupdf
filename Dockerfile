@@ -41,7 +41,6 @@ RUN apt-get update && \
     libjpeg8 \
     libopenjp2-7 \
     libjbig2dec0 \
-    libgumbo1 \
     libharfbuzz0b \
     && \
     rm -rf /var/lib/apt/lists/*
