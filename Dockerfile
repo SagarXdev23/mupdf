@@ -7,6 +7,7 @@ RUN apt-get update && \
     git \
     build-essential \
     pkg-config \
+    unzip \
     libfreetype6-dev \
     libjpeg-dev \
     libopenjp2-7-dev \
