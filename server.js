@@ -12,8 +12,6 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
-
-// Serve pdf-compress.html and other static files
 app.use(express.static(__dirname));
 
 const upload = multer({
@@ -43,15 +41,93 @@ function cleanup(...files) {
     }
 }
 
-function compressWithMuPDF(inputPath, outputPath) {
+/*
+    MuPDF compression profiles
+
+    low:
+        Quality priority
+        ~200 DPI
+        JPEG quality 82
+
+    medium:
+        Balanced
+        ~150 DPI
+        JPEG quality 75
+
+    high:
+        Size priority
+        ~100 DPI
+        JPEG quality 65
+*/
+
+const PROFILES = {
+    low: {
+        dpi: 200,
+        jpegQuality: 82
+    },
+
+    medium: {
+        dpi: 150,
+        jpegQuality: 75
+    },
+
+    high: {
+        dpi: 100,
+        jpegQuality: 65
+    }
+};
+
+function compressWithMuPDF(
+    inputPath,
+    outputPath,
+    quality
+) {
     return new Promise((resolve, reject) => {
+        const profile =
+            PROFILES[quality] ||
+            PROFILES.medium;
+
         const args = [
             'clean',
+
             '-gg',
             '-z',
+            '-f',
+            '-Z',
+
+            `--color-lossy-image-subsample-method=bicubic`,
+            `--color-lossy-image-subsample-dpi=${profile.dpi},${profile.dpi}`,
+            `--color-lossy-image-recompress-method=jpeg:${profile.jpegQuality}`,
+
+            `--gray-lossy-image-subsample-method=bicubic`,
+            `--gray-lossy-image-subsample-dpi=${profile.dpi},${profile.dpi}`,
+            `--gray-lossy-image-recompress-method=jpeg:${profile.jpegQuality}`,
+
+            `--bitonal-lossless-image-subsample-method=average`,
+            `--bitonal-lossless-image-subsample-dpi=${profile.dpi},${profile.dpi}`,
+            `--bitonal-lossless-image-recompress-method=fax`,
+
+            '--recompress-images-when=smaller',
+
             inputPath,
             outputPath
         ];
+
+        console.log(
+            `[MuPDF] Profile: ${quality}`
+        );
+
+        console.log(
+            `[MuPDF] DPI: ${profile.dpi}`
+        );
+
+        console.log(
+            `[MuPDF] JPEG quality: ${profile.jpegQuality}`
+        );
+
+        console.log(
+            `[MuPDF] Command: mutool ${args.join(' ')}`
+        );
 
         const start = Date.now();
 
@@ -59,18 +135,28 @@ function compressWithMuPDF(inputPath, outputPath) {
             'mutool',
             args,
             {
-                timeout: 120000,
+                timeout: 180000,
                 maxBuffer: 10 * 1024 * 1024
             },
             (err, stdout, stderr) => {
-                const elapsed = Date.now() - start;
+                const elapsed =
+                    Date.now() - start;
 
                 if (err) {
+                    console.error(
+                        '[MuPDF stderr]',
+                        stderr
+                    );
+
                     reject(
                         new Error(
-                            `MuPDF error: ${stderr || err.message}`
+                            `MuPDF error: ${
+                                stderr ||
+                                err.message
+                            }`
                         )
                     );
+
                     return;
                 }
 
@@ -80,14 +166,15 @@ function compressWithMuPDF(inputPath, outputPath) {
     });
 }
 
-// Serve PDF Compressor UI
 app.get('/', (req, res) => {
     res.sendFile(
-        path.join(__dirname, 'pdf-compress.html')
+        path.join(
+            __dirname,
+            'pdf-compressor.html'
+        )
     );
 });
 
-// Health check
 app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
@@ -95,30 +182,40 @@ app.get('/health', (req, res) => {
     });
 });
 
-// PDF compression
 app.post(
     '/compress',
     upload.single('file'),
     async (req, res) => {
-        const inputPath = req.file?.path;
+        const inputPath =
+            req.file?.path;
+
         let outputPath = null;
 
-        const requestStart = Date.now();
+        const requestStart =
+            Date.now();
 
         try {
             if (!req.file) {
                 return res.status(400).json({
-                    error: 'No PDF file uploaded'
+                    error:
+                        'No PDF file uploaded'
                 });
             }
 
-            const originalSize = req.file.size;
+            const originalSize =
+                req.file.size;
 
             const originalName =
                 req.file.originalname.replace(
                     /\.pdf$/i,
                     ''
                 );
+
+            const quality =
+                ['low', 'medium', 'high']
+                    .includes(req.body.quality)
+                    ? req.body.quality
+                    : 'medium';
 
             outputPath = path.join(
                 os.tmpdir(),
@@ -128,7 +225,8 @@ app.post(
             const compressionTime =
                 await compressWithMuPDF(
                     inputPath,
-                    outputPath
+                    outputPath,
+                    quality
                 );
 
             if (!fs.existsSync(outputPath)) {
@@ -140,8 +238,11 @@ app.post(
             const compressedSize =
                 fs.statSync(outputPath).size;
 
-            // If compression makes the file larger,
-            // send the original instead.
+            /*
+                If MuPDF somehow makes the file larger,
+                return the original file.
+            */
+
             const fileToSend =
                 compressedSize >= originalSize
                     ? inputPath
@@ -153,35 +254,65 @@ app.post(
                     : compressedSize;
 
             const savedBytes =
-                originalSize - finalSize;
+                originalSize -
+                finalSize;
 
             const savedPercent =
                 (
-                    (savedBytes / originalSize) *
+                    (savedBytes /
+                        originalSize) *
                     100
                 ).toFixed(1);
 
             const totalProcessingTime =
-                Date.now() - requestStart;
+                Date.now() -
+                requestStart;
 
-            console.log('--------------------------------');
-            console.log('MuPDF compression');
             console.log(
-                `Original: ${formatBytes(originalSize)}`
+                '================================'
             );
+
             console.log(
-                `Output:   ${formatBytes(finalSize)}`
+                'MuPDF COMPRESSION RESULT'
             );
+
             console.log(
-                `Saved:    ${savedPercent}%`
+                `Profile:   ${quality}`
             );
+
             console.log(
-                `MuPDF:    ${compressionTime} ms`
+                `Original:  ${formatBytes(
+                    originalSize
+                )}`
             );
+
             console.log(
-                `Total:    ${totalProcessingTime} ms`
+                `MuPDF:     ${formatBytes(
+                    compressedSize
+                )}`
             );
-            console.log('--------------------------------');
+
+            console.log(
+                `Final:     ${formatBytes(
+                    finalSize
+                )}`
+            );
+
+            console.log(
+                `Saved:     ${savedPercent}%`
+            );
+
+            console.log(
+                `MuPDF:     ${compressionTime} ms`
+            );
+
+            console.log(
+                `Total:     ${totalProcessingTime} ms`
+            );
+
+            console.log(
+                '================================'
+            );
 
             res.setHeader(
                 'Content-Type',
@@ -224,6 +355,11 @@ app.post(
             );
 
             res.setHeader(
+                'X-Compression-Profile',
+                quality
+            );
+
+            res.setHeader(
                 'Access-Control-Expose-Headers',
                 [
                     'X-Original-Size',
@@ -231,12 +367,15 @@ app.post(
                     'X-Saved-Bytes',
                     'X-Saved-Percent',
                     'X-Compression-Time',
-                    'X-Total-Processing-Time'
+                    'X-Total-Processing-Time',
+                    'X-Compression-Profile'
                 ].join(', ')
             );
 
             const stream =
-                fs.createReadStream(fileToSend);
+                fs.createReadStream(
+                    fileToSend
+                );
 
             stream.pipe(res);
 
@@ -276,34 +415,38 @@ app.post(
     }
 );
 
-// Error handler
-app.use((err, req, res, next) => {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(400).json({
-            error:
-                'File too large. Maximum size is 100MB.'
-        });
-    }
+app.use(
+    (err, req, res, next) => {
+        if (
+            err.code ===
+            'LIMIT_FILE_SIZE'
+        ) {
+            return res.status(400).json({
+                error:
+                    'File too large. Maximum size is 100MB.'
+            });
+        }
 
-    if (
-        err.message ===
-        'Only PDF files are allowed'
-    ) {
-        return res.status(400).json({
-            error: err.message
-        });
-    }
+        if (
+            err.message ===
+            'Only PDF files are allowed'
+        ) {
+            return res.status(400).json({
+                error: err.message
+            });
+        }
 
-    console.error(err);
+        console.error(err);
 
-    if (!res.headersSent) {
-        res.status(500).json({
-            error:
-                err.message ||
-                'Server error'
-        });
+        if (!res.headersSent) {
+            res.status(500).json({
+                error:
+                    err.message ||
+                    'Server error'
+            });
+        }
     }
-});
+);
 
 function formatBytes(bytes) {
     if (bytes === 0) {
@@ -317,18 +460,29 @@ function formatBytes(bytes) {
         'GB'
     ];
 
-    const index = Math.floor(
-        Math.log(bytes) / Math.log(1024)
-    );
+    const index =
+        Math.floor(
+            Math.log(bytes) /
+            Math.log(1024)
+        );
 
     return `${(
         bytes /
-        Math.pow(1024, index)
-    ).toFixed(2)} ${units[index]}`;
+        Math.pow(
+            1024,
+            index
+        )
+    ).toFixed(2)} ${
+        units[index]
+    }`;
 }
 
-app.listen(PORT, () => {
-    console.log(
-        `🚀 MuPDF Compressor running on port ${PORT}`
-    );
-});
+app.listen(
+    PORT,
+    '0.0.0.0',
+    () => {
+        console.log(
+            `🚀 MuPDF Compressor running on port ${PORT}`
+        );
+    }
+);
